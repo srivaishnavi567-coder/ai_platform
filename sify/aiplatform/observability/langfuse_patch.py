@@ -19,6 +19,18 @@ def _mark_patched(fn: Callable):
     return fn
 
 
+def _start_trace(lf, **kwargs):
+    """
+    Langfuse API compatibility layer.
+    Supports v2 and v3 safely.
+    """
+    if hasattr(lf, "start_trace"):
+        return lf.start_trace(**kwargs)
+    if hasattr(lf, "trace"):
+        return lf.trace(**kwargs)
+    return None
+
+
 # -------------------------------------------------
 # Patch: chat_completion
 # -------------------------------------------------
@@ -36,14 +48,16 @@ def _patch_chat_completion():
         start = time.time()
 
         if lf and not stream:
-            trace = lf.trace(
+            trace = _start_trace(
+                lf,
                 name="chat_completion",
                 input={
                     "messages": messages,
                     "params": kwargs
                 },
                 metadata={
-                    "model": self.model_id
+                    "model": self.model_id,
+                    "type": "chat"
                 }
             )
 
@@ -57,7 +71,8 @@ def _patch_chat_completion():
                     input=messages,
                     output=str(result),
                     metadata={
-                        "latency_ms": (time.time() - start) * 1000
+                        "latency_ms": round((time.time() - start) * 1000, 2),
+                        "status": "success"
                     }
                 )
                 trace.end()
@@ -73,7 +88,8 @@ def _patch_chat_completion():
                     output=None,
                     metadata={
                         "error": str(e),
-                        "latency_ms": (time.time() - start) * 1000
+                        "latency_ms": round((time.time() - start) * 1000, 2),
+                        "status": "error"
                     }
                 )
                 trace.end()
@@ -99,16 +115,18 @@ def _patch_completion():
         start = time.time()
 
         if lf and not stream:
-            trace = lf.start_trace(
+            trace = _start_trace(
+                lf,
                 name="completion",
                 input={
-                "prompt": prompt,
-                "params": kwargs
-         }  ,
-    metadata={
-        "model": self.model_id
-    }
-)
+                    "prompt": prompt,
+                    "params": kwargs
+                },
+                metadata={
+                    "model": self.model_id,
+                    "type": "completion"
+                }
+            )
 
         try:
             result = original(self, prompt, stream=stream, **kwargs)
@@ -120,7 +138,8 @@ def _patch_completion():
                     input=prompt,
                     output=str(result),
                     metadata={
-                        "latency_ms": (time.time() - start) * 1000
+                        "latency_ms": round((time.time() - start) * 1000, 2),
+                        "status": "success"
                     }
                 )
                 trace.end()
@@ -136,7 +155,8 @@ def _patch_completion():
                     output=None,
                     metadata={
                         "error": str(e),
-                        "latency_ms": (time.time() - start) * 1000
+                        "latency_ms": round((time.time() - start) * 1000, 2),
+                        "status": "error"
                     }
                 )
                 trace.end()
@@ -150,9 +170,6 @@ def _patch_completion():
 # -------------------------------------------------
 
 def apply_langfuse_patch():
-    """
-    Apply Langfuse monkey patches to ModelAsAService.
-    Safe to call multiple times.
-    """
     _patch_chat_completion()
     _patch_completion()
+
