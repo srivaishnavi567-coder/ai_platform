@@ -14,6 +14,9 @@ from sify.aiplatform.models.types import (
     RerankResponse,
     APIError
 )
+# new lines for langfuse patching
+from sify.aiplatform.observability.runtime import ensure_langfuse_patch
+
 
 
 class ModelAsAService:
@@ -390,6 +393,7 @@ class ModelAsAService:
         return EmbeddingResponse.from_dict(response["result"])
 
     # LLM Service Methods
+    ensure_langfuse_patch()
     def chat_completion(self, messages: List[Dict[str, Any]], 
                        stream: bool = False, **kwargs) -> Union[ChatCompletionResponse, Generator[ChatCompletionChunk, None, None]]:
         """
@@ -521,6 +525,8 @@ class ModelAsAService:
             return _stream_generator()
         else:
             return _non_stream_generator()
+
+    ensure_langfuse_patch()        
 
     def completion(self, prompt: str, stream: bool = False, **kwargs) -> Union[CompletionResponse, Generator[CompletionChunk, None, None]]:
         """
