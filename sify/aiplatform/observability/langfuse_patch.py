@@ -99,16 +99,17 @@ def _patch_completion():
         start = time.time()
 
         if lf and not stream:
-            trace = lf.trace(
-                name="completion",
-                input={
-                    "prompt": prompt,
-                    "params": kwargs
-                },
-                metadata={
-                    "model": self.model_id
-                }
-            )
+           trace = lf.start_trace(
+    name="chat_completion",
+    input={
+        "messages": messages,
+        "params": kwargs
+    },
+    metadata={
+        "model": self.model_id
+    }
+)
+
 
         try:
             result = original(self, prompt, stream=stream, **kwargs)
