@@ -182,7 +182,7 @@ from sify.aiplatform.models.model_as_a_service import ModelAsAService
 
 
 # -------------------------------------------------
-# Internal helpers
+# Helpers
 # -------------------------------------------------
 
 def _already_patched(fn: Callable) -> bool:
@@ -227,10 +227,8 @@ def _patch_chat_completion():
             result = original(self, messages, stream=stream, **kwargs)
 
             if root_span:
-                gen_span = lf.start_span(
+                gen_span = root_span.start_span(
                     name="chat_completion_generation",
-                    trace_id=root_span.trace_id,
-                    parent_span_id=root_span.id,
                     input=messages,
                     output=str(result),
                     metadata={
@@ -246,10 +244,8 @@ def _patch_chat_completion():
 
         except Exception as e:
             if root_span:
-                err_span = lf.start_span(
+                err_span = root_span.start_span(
                     name="chat_completion_error",
-                    trace_id=root_span.trace_id,
-                    parent_span_id=root_span.id,
                     input=messages,
                     metadata={
                         "error": str(e),
@@ -297,10 +293,8 @@ def _patch_completion():
             result = original(self, prompt, stream=stream, **kwargs)
 
             if root_span:
-                gen_span = lf.start_span(
+                gen_span = root_span.start_span(
                     name="completion_generation",
-                    trace_id=root_span.trace_id,
-                    parent_span_id=root_span.id,
                     input=prompt,
                     output=str(result),
                     metadata={
@@ -316,10 +310,8 @@ def _patch_completion():
 
         except Exception as e:
             if root_span:
-                err_span = lf.start_span(
+                err_span = root_span.start_span(
                     name="completion_error",
-                    trace_id=root_span.trace_id,
-                    parent_span_id=root_span.id,
                     input=prompt,
                     metadata={
                         "error": str(e),
@@ -335,10 +327,11 @@ def _patch_completion():
 
 
 # -------------------------------------------------
-# Public entrypoint
+# Entrypoint
 # -------------------------------------------------
 
 def apply_langfuse_patch():
     _patch_chat_completion()
     _patch_completion()
+
 
