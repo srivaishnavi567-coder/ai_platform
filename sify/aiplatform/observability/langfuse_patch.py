@@ -35,7 +35,6 @@ def _patch_chat_completion():
         trace = None
         start = time.time()
 
-        # Create trace BEFORE calling MAAS
         if lf and not stream:
             trace = lf.trace(
                 name="chat_completion",
@@ -66,7 +65,6 @@ def _patch_chat_completion():
             return result
 
         except Exception as e:
-            # ERROR TRACE (this is your current case)
             if trace:
                 trace.generation(
                     name="chat_completion_error",
