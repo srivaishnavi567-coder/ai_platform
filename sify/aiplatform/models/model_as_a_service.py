@@ -16,11 +16,13 @@ from sify.aiplatform.models.types import (
 )
 # new lines for langfuse patching
 from sify.aiplatform.observability.runtime import ensure_langfuse_patch
+from sify.aiplatform.observability.runtime import ensure_langfuse_patch
 
 
 
 class ModelAsAService:
     def __init__(self, api_key: str, model_id: str = None):
+        ensure_langfuse_patch()
         if not api_key or not api_key.strip():
             raise ValueError("API key must be provided and cannot be empty")
 
