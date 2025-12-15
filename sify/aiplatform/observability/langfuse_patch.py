@@ -194,14 +194,6 @@ def _mark_patched(fn: Callable):
     return fn
 
 
-def _start_root_span(lf, **kwargs):
-    """
-    Langfuse v3:
-    Root span = trace
-    """
-    return lf.start_span(**kwargs)
-
-
 # -------------------------------------------------
 # Patch: chat_completion
 # -------------------------------------------------
@@ -219,8 +211,7 @@ def _patch_chat_completion():
         start = time.time()
 
         if lf and not stream:
-            root_span = _start_root_span(
-                lf,
+            root_span = lf.start_span(
                 name="chat_completion",
                 input={
                     "messages": messages,
@@ -238,7 +229,8 @@ def _patch_chat_completion():
             if root_span:
                 gen_span = lf.start_span(
                     name="chat_completion_generation",
-                    parent=root_span,
+                    trace_id=root_span.trace_id,
+                    parent_span_id=root_span.id,
                     input=messages,
                     output=str(result),
                     metadata={
@@ -256,9 +248,9 @@ def _patch_chat_completion():
             if root_span:
                 err_span = lf.start_span(
                     name="chat_completion_error",
-                    parent=root_span,
+                    trace_id=root_span.trace_id,
+                    parent_span_id=root_span.id,
                     input=messages,
-                    output=None,
                     metadata={
                         "error": str(e),
                         "latency_ms": round((time.time() - start) * 1000, 2),
@@ -289,8 +281,7 @@ def _patch_completion():
         start = time.time()
 
         if lf and not stream:
-            root_span = _start_root_span(
-                lf,
+            root_span = lf.start_span(
                 name="completion",
                 input={
                     "prompt": prompt,
@@ -308,7 +299,8 @@ def _patch_completion():
             if root_span:
                 gen_span = lf.start_span(
                     name="completion_generation",
-                    parent=root_span,
+                    trace_id=root_span.trace_id,
+                    parent_span_id=root_span.id,
                     input=prompt,
                     output=str(result),
                     metadata={
@@ -326,9 +318,9 @@ def _patch_completion():
             if root_span:
                 err_span = lf.start_span(
                     name="completion_error",
-                    parent=root_span,
+                    trace_id=root_span.trace_id,
+                    parent_span_id=root_span.id,
                     input=prompt,
-                    output=None,
                     metadata={
                         "error": str(e),
                         "latency_ms": round((time.time() - start) * 1000, 2),
@@ -347,9 +339,6 @@ def _patch_completion():
 # -------------------------------------------------
 
 def apply_langfuse_patch():
-    """
-    Apply Langfuse v3 patches to MAAS SDK.
-    Safe to call multiple times.
-    """
     _patch_chat_completion()
     _patch_completion()
+
