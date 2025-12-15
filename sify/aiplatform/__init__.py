@@ -1,2 +1,3 @@
 from .client import AiPlatform
-import sify.aiplatform.observability 
+import sify.aiplatform.observability
+
