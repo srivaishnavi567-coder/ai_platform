@@ -1,3 +1,5 @@
+
+
 # import time
 # from functools import wraps
 # from typing import Callable
@@ -7,7 +9,7 @@
 
 
 # # -------------------------------------------------
-# # Internal helpers
+# # Helpers
 # # -------------------------------------------------
 
 # def _already_patched(fn: Callable) -> bool:
@@ -17,18 +19,6 @@
 # def _mark_patched(fn: Callable):
 #     setattr(fn, "_langfuse_patched", True)
 #     return fn
-
-
-# def _start_trace(lf, **kwargs):
-#     """
-#     Langfuse API compatibility layer.
-#     Supports v2 and v3 safely.
-#     """
-#     if hasattr(lf, "start_trace"):
-#         return lf.start_trace(**kwargs)
-#     if hasattr(lf, "trace"):
-#         return lf.trace(**kwargs)
-#     return None
 
 
 # # -------------------------------------------------
@@ -44,55 +34,54 @@
 #     @wraps(original)
 #     def wrapped(self, messages, stream=False, **kwargs):
 #         lf = get_langfuse()
-#         trace = None
+#         root_span = None
 #         start = time.time()
 
 #         if lf and not stream:
-#             trace = _start_trace(
-#                 lf,
+#             root_span = lf.start_span(
 #                 name="chat_completion",
 #                 input={
 #                     "messages": messages,
-#                     "params": kwargs
+#                     "params": kwargs,
 #                 },
 #                 metadata={
 #                     "model": self.model_id,
-#                     "type": "chat"
-#                 }
+#                     "type": "chat",
+#                 },
 #             )
 
 #         try:
 #             result = original(self, messages, stream=stream, **kwargs)
 
-#             if trace:
-#                 trace.generation(
-#                     name="chat_completion",
-#                     model=self.model_id,
+#             if root_span:
+#                 gen_span = root_span.start_span(
+#                     name="chat_completion_generation",
 #                     input=messages,
 #                     output=str(result),
 #                     metadata={
+#                         "model": self.model_id,
 #                         "latency_ms": round((time.time() - start) * 1000, 2),
-#                         "status": "success"
-#                     }
+#                         "status": "success",
+#                     },
 #                 )
-#                 trace.end()
+#                 gen_span.end()
+#                 root_span.end()
 
 #             return result
 
 #         except Exception as e:
-#             if trace:
-#                 trace.generation(
+#             if root_span:
+#                 err_span = root_span.start_span(
 #                     name="chat_completion_error",
-#                     model=self.model_id,
 #                     input=messages,
-#                     output=None,
 #                     metadata={
 #                         "error": str(e),
 #                         "latency_ms": round((time.time() - start) * 1000, 2),
-#                         "status": "error"
-#                     }
+#                         "status": "error",
+#                     },
 #                 )
-#                 trace.end()
+#                 err_span.end()
+#                 root_span.end()
 #             raise
 
 #     ModelAsAService.chat_completion = _mark_patched(wrapped)
@@ -111,67 +100,67 @@
 #     @wraps(original)
 #     def wrapped(self, prompt, stream=False, **kwargs):
 #         lf = get_langfuse()
-#         trace = None
+#         root_span = None
 #         start = time.time()
 
 #         if lf and not stream:
-#             trace = _start_trace(
-#                 lf,
+#             root_span = lf.start_span(
 #                 name="completion",
 #                 input={
 #                     "prompt": prompt,
-#                     "params": kwargs
+#                     "params": kwargs,
 #                 },
 #                 metadata={
 #                     "model": self.model_id,
-#                     "type": "completion"
-#                 }
+#                     "type": "completion",
+#                 },
 #             )
 
 #         try:
 #             result = original(self, prompt, stream=stream, **kwargs)
 
-#             if trace:
-#                 trace.generation(
-#                     name="completion",
-#                     model=self.model_id,
+#             if root_span:
+#                 gen_span = root_span.start_span(
+#                     name="completion_generation",
 #                     input=prompt,
 #                     output=str(result),
 #                     metadata={
+#                         "model": self.model_id,
 #                         "latency_ms": round((time.time() - start) * 1000, 2),
-#                         "status": "success"
-#                     }
+#                         "status": "success",
+#                     },
 #                 )
-#                 trace.end()
+#                 gen_span.end()
+#                 root_span.end()
 
 #             return result
 
 #         except Exception as e:
-#             if trace:
-#                 trace.generation(
+#             if root_span:
+#                 err_span = root_span.start_span(
 #                     name="completion_error",
-#                     model=self.model_id,
 #                     input=prompt,
-#                     output=None,
 #                     metadata={
 #                         "error": str(e),
 #                         "latency_ms": round((time.time() - start) * 1000, 2),
-#                         "status": "error"
-#                     }
+#                         "status": "error",
+#                     },
 #                 )
-#                 trace.end()
+#                 err_span.end()
+#                 root_span.end()
 #             raise
 
 #     ModelAsAService.completion = _mark_patched(wrapped)
 
 
-# -------------------------------------------------
-# Public entrypoint
-# -------------------------------------------------
+# # -------------------------------------------------
+# # Entrypoint
+# # -------------------------------------------------
 
 # def apply_langfuse_patch():
 #     _patch_chat_completion()
 #     _patch_completion()
+
 
 import time
 from functools import wraps
@@ -195,7 +184,7 @@ def _mark_patched(fn: Callable):
 
 
 # -------------------------------------------------
-# Patch: chat_completion
+# Patch: chat_completion (NON-BREAKING)
 # -------------------------------------------------
 
 def _patch_chat_completion():
@@ -207,61 +196,69 @@ def _patch_chat_completion():
     @wraps(original)
     def wrapped(self, messages, stream=False, **kwargs):
         lf = get_langfuse()
-        root_span = None
         start = time.time()
 
+        trace = generation = None
+
+        # ⚠️ DO NOT TRACE STREAMING (safe behavior, unchanged)
         if lf and not stream:
-            root_span = lf.start_span(
+            trace = lf.trace(
                 name="chat_completion",
-                input={
-                    "messages": messages,
-                    "params": kwargs,
-                },
                 metadata={
                     "model": self.model_id,
                     "type": "chat",
                 },
             )
 
+            generation = trace.generation(
+                name="chat_completion_generation",
+                model=self.model_id,
+                input={
+                    "messages": messages,
+                    "params": kwargs,
+                },
+            )
+
         try:
             result = original(self, messages, stream=stream, **kwargs)
 
-            if root_span:
-                gen_span = root_span.start_span(
-                    name="chat_completion_generation",
-                    input=messages,
-                    output=str(result),
+            if generation:
+                output_text = None
+                usage = None
+
+                try:
+                    output_text = result.choices[0].message.content
+                    usage = result.usage.__dict__ if result.usage else None
+                except Exception:
+                    output_text = str(result)
+
+                generation.end(
+                    output=output_text,
+                    usage=usage,
                     metadata={
-                        "model": self.model_id,
                         "latency_ms": round((time.time() - start) * 1000, 2),
                         "status": "success",
                     },
                 )
-                gen_span.end()
-                root_span.end()
 
             return result
 
         except Exception as e:
-            if root_span:
-                err_span = root_span.start_span(
-                    name="chat_completion_error",
-                    input=messages,
+            if generation:
+                generation.end(
+                    status="error",
                     metadata={
                         "error": str(e),
                         "latency_ms": round((time.time() - start) * 1000, 2),
-                        "status": "error",
                     },
                 )
-                err_span.end()
-                root_span.end()
             raise
 
     ModelAsAService.chat_completion = _mark_patched(wrapped)
 
 
 # -------------------------------------------------
-# Patch: completion
+# Patch: completion (NON-BREAKING)
 # -------------------------------------------------
 
 def _patch_completion():
@@ -273,54 +270,61 @@ def _patch_completion():
     @wraps(original)
     def wrapped(self, prompt, stream=False, **kwargs):
         lf = get_langfuse()
-        root_span = None
         start = time.time()
 
+        trace = generation = None
+
         if lf and not stream:
-            root_span = lf.start_span(
+            trace = lf.trace(
                 name="completion",
-                input={
-                    "prompt": prompt,
-                    "params": kwargs,
-                },
                 metadata={
                     "model": self.model_id,
                     "type": "completion",
                 },
             )
 
+            generation = trace.generation(
+                name="completion_generation",
+                model=self.model_id,
+                input={
+                    "prompt": prompt,
+                    "params": kwargs,
+                },
+            )
+
         try:
             result = original(self, prompt, stream=stream, **kwargs)
 
-            if root_span:
-                gen_span = root_span.start_span(
-                    name="completion_generation",
-                    input=prompt,
-                    output=str(result),
+            if generation:
+                output_text = None
+                usage = None
+
+                try:
+                    output_text = result.choices[0].text
+                    usage = result.usage.__dict__ if result.usage else None
+                except Exception:
+                    output_text = str(result)
+
+                generation.end(
+                    output=output_text,
+                    usage=usage,
                     metadata={
-                        "model": self.model_id,
                         "latency_ms": round((time.time() - start) * 1000, 2),
                         "status": "success",
                     },
                 )
-                gen_span.end()
-                root_span.end()
 
             return result
 
         except Exception as e:
-            if root_span:
-                err_span = root_span.start_span(
-                    name="completion_error",
-                    input=prompt,
+            if generation:
+                generation.end(
+                    status="error",
                     metadata={
                         "error": str(e),
                         "latency_ms": round((time.time() - start) * 1000, 2),
-                        "status": "error",
                     },
                 )
-                err_span.end()
-                root_span.end()
             raise
 
     ModelAsAService.completion = _mark_patched(wrapped)
@@ -333,5 +337,3 @@ def _patch_completion():
 def apply_langfuse_patch():
     _patch_chat_completion()
     _patch_completion()
-
-
