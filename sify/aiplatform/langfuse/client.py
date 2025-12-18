@@ -59,7 +59,7 @@
 import os
 from typing import Optional
 
-os.environ.setdefault("OTEL_TRACES_EXPORTER", "none")
+
 os.environ.setdefault("OTEL_METRICS_EXPORTER", "none")
 os.environ.setdefault("OTEL_LOGS_EXPORTER", "none")
 from langfuse import Langfuse
