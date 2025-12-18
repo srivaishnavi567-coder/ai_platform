@@ -60,8 +60,8 @@ import os
 from typing import Optional
 
 
-os.environ.setdefault("OTEL_METRICS_EXPORTER", "none")
-os.environ.setdefault("OTEL_LOGS_EXPORTER", "none")
+# 🔒 HARD DISABLE OTEL (must be BEFORE langfuse import)
+os.environ["OTEL_SDK_DISABLED"] = "true"
 from langfuse import Langfuse
 from .config import get_langfuse_config
 
