@@ -61,7 +61,7 @@ from typing import Optional
 
 
 # 🔒 HARD DISABLE OTEL (must be BEFORE langfuse import)
-os.environ["OTEL_SDK_DISABLED"] = "true"
+
 from langfuse import Langfuse
 from .config import get_langfuse_config
 
