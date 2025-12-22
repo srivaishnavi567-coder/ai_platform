@@ -188,7 +188,7 @@ def _get_context():
 
 
 # -------------------------------------------------
-# chat_completion patch (SAFE)
+# chat_completion patch (PYTHON SDK SAFE)
 # -------------------------------------------------
 
 def _patch_chat_completion():
@@ -200,11 +200,14 @@ def _patch_chat_completion():
     def wrapped(self, messages, stream=False, **kwargs):
         lf = get_langfuse()
         start = time.time()
+
+        trace = None
         root_span = None
         ctx = _get_context()
 
         if lf and not stream:
-            root_span = lf.start_span(
+            # ✅ TRACE carries user_id + session_id
+            trace = lf.start_trace(
                 name="chat_completion",
                 input={
                     "messages": messages,
@@ -216,6 +219,11 @@ def _patch_chat_completion():
                 },
                 user_id=ctx.get("user_id"),
                 session_id=ctx.get("session_id"),
+            )
+
+            # ✅ Span inside trace
+            root_span = trace.start_span(
+                name="chat_completion_span"
             )
 
         try:
@@ -243,6 +251,7 @@ def _patch_chat_completion():
                 )
                 gen_span.end()
                 root_span.end()
+                trace.end()
 
             return result
 
@@ -259,13 +268,14 @@ def _patch_chat_completion():
                 )
                 err_span.end()
                 root_span.end()
+                trace.end()
             raise
 
     ModelAsAService.chat_completion = _mark_patched(wrapped)
 
 
 # -------------------------------------------------
-# completion patch (SAFE)
+# completion patch (PYTHON SDK SAFE)
 # -------------------------------------------------
 
 def _patch_completion():
@@ -277,11 +287,13 @@ def _patch_completion():
     def wrapped(self, prompt, stream=False, **kwargs):
         lf = get_langfuse()
         start = time.time()
+
+        trace = None
         root_span = None
         ctx = _get_context()
 
         if lf and not stream:
-            root_span = lf.start_span(
+            trace = lf.start_trace(
                 name="completion",
                 input={
                     "prompt": prompt,
@@ -293,6 +305,10 @@ def _patch_completion():
                 },
                 user_id=ctx.get("user_id"),
                 session_id=ctx.get("session_id"),
+            )
+
+            root_span = trace.start_span(
+                name="completion_span"
             )
 
         try:
@@ -320,6 +336,7 @@ def _patch_completion():
                 )
                 gen_span.end()
                 root_span.end()
+                trace.end()
 
             return result
 
@@ -336,6 +353,7 @@ def _patch_completion():
                 )
                 err_span.end()
                 root_span.end()
+                trace.end()
             raise
 
     ModelAsAService.completion = _mark_patched(wrapped)
@@ -344,4 +362,5 @@ def _patch_completion():
 def apply_langfuse_patch():
     _patch_chat_completion()
     _patch_completion()
+
 
