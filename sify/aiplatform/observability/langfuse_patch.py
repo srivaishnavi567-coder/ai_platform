@@ -182,8 +182,8 @@ def _mark_patched(fn: Callable):
 
 def _get_context():
     return {
-        "session_id": os.getenv("LANGFUSE_SESSION_ID"),
         "user_id": os.getenv("LANGFUSE_USER_ID"),
+        "session_id": os.getenv("LANGFUSE_SESSION_ID"),
     }
 
 
@@ -201,6 +201,7 @@ def _patch_chat_completion():
         lf = get_langfuse()
         start = time.time()
         root_span = None
+        ctx = _get_context()
 
         if lf and not stream:
             root_span = lf.start_span(
@@ -212,8 +213,9 @@ def _patch_chat_completion():
                 metadata={
                     "model": self.model_id,
                     "type": "chat",
-                    **_get_context(),
                 },
+                user_id=ctx.get("user_id"),
+                session_id=ctx.get("session_id"),
             )
 
         try:
@@ -253,7 +255,6 @@ def _patch_chat_completion():
                         "error": str(e),
                         "latency_ms": round((time.time() - start) * 1000, 2),
                         "status": "error",
-                        **_get_context(),
                     },
                 )
                 err_span.end()
@@ -277,6 +278,7 @@ def _patch_completion():
         lf = get_langfuse()
         start = time.time()
         root_span = None
+        ctx = _get_context()
 
         if lf and not stream:
             root_span = lf.start_span(
@@ -288,8 +290,9 @@ def _patch_completion():
                 metadata={
                     "model": self.model_id,
                     "type": "completion",
-                    **_get_context(),
                 },
+                user_id=ctx.get("user_id"),
+                session_id=ctx.get("session_id"),
             )
 
         try:
@@ -329,7 +332,6 @@ def _patch_completion():
                         "error": str(e),
                         "latency_ms": round((time.time() - start) * 1000, 2),
                         "status": "error",
-                        **_get_context(),
                     },
                 )
                 err_span.end()
