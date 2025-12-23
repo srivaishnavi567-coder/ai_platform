@@ -188,7 +188,7 @@ def _get_context():
 
 
 # -------------------------------------------------
-# chat_completion patch (PYTHON SDK SAFE)
+# chat_completion patch (CORRECT PYTHON SDK USAGE)
 # -------------------------------------------------
 
 def _patch_chat_completion():
@@ -200,14 +200,14 @@ def _patch_chat_completion():
     def wrapped(self, messages, stream=False, **kwargs):
         lf = get_langfuse()
         start = time.time()
+        ctx = _get_context()
 
         trace = None
         root_span = None
-        ctx = _get_context()
 
         if lf and not stream:
-            # ✅ TRACE carries user_id + session_id
-            trace = lf.start_trace(
+            # ✅ Create TRACE (user_id & session_id live here)
+            trace = lf.trace(
                 name="chat_completion",
                 input={
                     "messages": messages,
@@ -221,10 +221,8 @@ def _patch_chat_completion():
                 session_id=ctx.get("session_id"),
             )
 
-            # ✅ Span inside trace
-            root_span = trace.start_span(
-                name="chat_completion_span"
-            )
+            # ✅ Create SPAN inside trace
+            root_span = trace.span(name="chat_completion_span")
 
         try:
             result = original(self, messages, stream=stream, **kwargs)
@@ -239,7 +237,7 @@ def _patch_chat_completion():
                 except Exception:
                     output = str(result)
 
-                gen_span = root_span.start_span(
+                gen_span = trace.span(
                     name="chat_completion_generation",
                     input=messages,
                     output=output,
@@ -256,8 +254,8 @@ def _patch_chat_completion():
             return result
 
         except Exception as e:
-            if root_span:
-                err_span = root_span.start_span(
+            if trace:
+                err_span = trace.span(
                     name="chat_completion_error",
                     input=messages,
                     metadata={
@@ -267,7 +265,6 @@ def _patch_chat_completion():
                     },
                 )
                 err_span.end()
-                root_span.end()
                 trace.end()
             raise
 
@@ -275,7 +272,7 @@ def _patch_chat_completion():
 
 
 # -------------------------------------------------
-# completion patch (PYTHON SDK SAFE)
+# completion patch (CORRECT PYTHON SDK USAGE)
 # -------------------------------------------------
 
 def _patch_completion():
@@ -287,13 +284,13 @@ def _patch_completion():
     def wrapped(self, prompt, stream=False, **kwargs):
         lf = get_langfuse()
         start = time.time()
+        ctx = _get_context()
 
         trace = None
         root_span = None
-        ctx = _get_context()
 
         if lf and not stream:
-            trace = lf.start_trace(
+            trace = lf.trace(
                 name="completion",
                 input={
                     "prompt": prompt,
@@ -307,9 +304,7 @@ def _patch_completion():
                 session_id=ctx.get("session_id"),
             )
 
-            root_span = trace.start_span(
-                name="completion_span"
-            )
+            root_span = trace.span(name="completion_span")
 
         try:
             result = original(self, prompt, stream=stream, **kwargs)
@@ -324,7 +319,7 @@ def _patch_completion():
                 except Exception:
                     output = str(result)
 
-                gen_span = root_span.start_span(
+                gen_span = trace.span(
                     name="completion_generation",
                     input=prompt,
                     output=output,
@@ -341,8 +336,8 @@ def _patch_completion():
             return result
 
         except Exception as e:
-            if root_span:
-                err_span = root_span.start_span(
+            if trace:
+                err_span = trace.span(
                     name="completion_error",
                     input=prompt,
                     metadata={
@@ -352,11 +347,16 @@ def _patch_completion():
                     },
                 )
                 err_span.end()
-                root_span.end()
                 trace.end()
             raise
 
     ModelAsAService.completion = _mark_patched(wrapped)
+
+
+def apply_langfuse_patch():
+    _patch_chat_completion()
+    _patch_completion()
+
 
 
 def apply_langfuse_patch():
