@@ -167,6 +167,7 @@ import os
 from functools import wraps
 from typing import Callable
 
+from langfuse import propagate_attributes
 from sify.aiplatform.langfuse.client import get_langfuse
 from sify.aiplatform.models.model_as_a_service import ModelAsAService
 
@@ -188,7 +189,7 @@ def _get_context():
 
 
 # -------------------------------------------------
-# chat_completion patch (CORRECT PYTHON SDK USAGE)
+# chat_completion patch (OBSERVATION API)
 # -------------------------------------------------
 
 def _patch_chat_completion():
@@ -202,77 +203,74 @@ def _patch_chat_completion():
         start = time.time()
         ctx = _get_context()
 
-        trace = None
-        root_span = None
+        if not lf or stream:
+            return original(self, messages, stream=stream, **kwargs)
 
-        if lf and not stream:
-            # ✅ Create TRACE (user_id & session_id live here)
-            trace = lf.trace(
-                name="chat_completion",
-                input={
-                    "messages": messages,
-                    "params": kwargs,
-                },
-                metadata={
-                    "model": self.model_id,
-                    "type": "chat",
-                },
+        # ✅ Root observation
+        with lf.start_as_current_observation(
+            as_type="span",
+            name="chat_completion",
+            input={
+                "messages": messages,
+                "params": kwargs,
+            },
+            metadata={
+                "model": self.model_id,
+                "type": "chat",
+            },
+        ):
+            # ✅ Propagate user_id & session_id (DOCS WAY)
+            with propagate_attributes(
                 user_id=ctx.get("user_id"),
                 session_id=ctx.get("session_id"),
-            )
-
-            # ✅ Create SPAN inside trace
-            root_span = trace.span(name="chat_completion_span")
-
-        try:
-            result = original(self, messages, stream=stream, **kwargs)
-
-            if root_span:
-                output = None
-                usage = None
-
+            ):
                 try:
-                    output = result.choices[0].message.content
-                    usage = result.usage.__dict__ if result.usage else None
-                except Exception:
-                    output = str(result)
+                    result = original(self, messages, stream=stream, **kwargs)
 
-                gen_span = trace.span(
-                    name="chat_completion_generation",
-                    input=messages,
-                    output=output,
-                    metadata={
-                        "latency_ms": round((time.time() - start) * 1000, 2),
-                        "status": "success",
-                        "usage": usage,
-                    },
-                )
-                gen_span.end()
-                root_span.end()
-                trace.end()
+                    output = None
+                    usage = None
+                    try:
+                        output = result.choices[0].message.content
+                        usage = result.usage.__dict__ if result.usage else None
+                    except Exception:
+                        output = str(result)
 
-            return result
+                    # ✅ Generation observation
+                    with lf.start_as_current_observation(
+                        as_type="generation",
+                        name="chat_completion_generation",
+                        input=messages,
+                        output=output,
+                        metadata={
+                            "latency_ms": round((time.time() - start) * 1000, 2),
+                            "status": "success",
+                            "usage": usage,
+                            "model": self.model_id,
+                        },
+                    ):
+                        pass
 
-        except Exception as e:
-            if trace:
-                err_span = trace.span(
-                    name="chat_completion_error",
-                    input=messages,
-                    metadata={
-                        "error": str(e),
-                        "latency_ms": round((time.time() - start) * 1000, 2),
-                        "status": "error",
-                    },
-                )
-                err_span.end()
-                trace.end()
-            raise
+                    return result
+
+                except Exception as e:
+                    with lf.start_as_current_observation(
+                        as_type="span",
+                        name="chat_completion_error",
+                        input=messages,
+                        metadata={
+                            "error": str(e),
+                            "latency_ms": round((time.time() - start) * 1000, 2),
+                            "status": "error",
+                        },
+                    ):
+                        pass
+                    raise
 
     ModelAsAService.chat_completion = _mark_patched(wrapped)
 
 
 # -------------------------------------------------
-# completion patch (CORRECT PYTHON SDK USAGE)
+# completion patch (OBSERVATION API)
 # -------------------------------------------------
 
 def _patch_completion():
@@ -286,69 +284,65 @@ def _patch_completion():
         start = time.time()
         ctx = _get_context()
 
-        trace = None
-        root_span = None
+        if not lf or stream:
+            return original(self, prompt, stream=stream, **kwargs)
 
-        if lf and not stream:
-            trace = lf.trace(
-                name="completion",
-                input={
-                    "prompt": prompt,
-                    "params": kwargs,
-                },
-                metadata={
-                    "model": self.model_id,
-                    "type": "completion",
-                },
+        with lf.start_as_current_observation(
+            as_type="span",
+            name="completion",
+            input={
+                "prompt": prompt,
+                "params": kwargs,
+            },
+            metadata={
+                "model": self.model_id,
+                "type": "completion",
+            },
+        ):
+            with propagate_attributes(
                 user_id=ctx.get("user_id"),
                 session_id=ctx.get("session_id"),
-            )
-
-            root_span = trace.span(name="completion_span")
-
-        try:
-            result = original(self, prompt, stream=stream, **kwargs)
-
-            if root_span:
-                output = None
-                usage = None
-
+            ):
                 try:
-                    output = result.choices[0].text
-                    usage = result.usage.__dict__ if result.usage else None
-                except Exception:
-                    output = str(result)
+                    result = original(self, prompt, stream=stream, **kwargs)
 
-                gen_span = trace.span(
-                    name="completion_generation",
-                    input=prompt,
-                    output=output,
-                    metadata={
-                        "latency_ms": round((time.time() - start) * 1000, 2),
-                        "status": "success",
-                        "usage": usage,
-                    },
-                )
-                gen_span.end()
-                root_span.end()
-                trace.end()
+                    output = None
+                    usage = None
+                    try:
+                        output = result.choices[0].text
+                        usage = result.usage.__dict__ if result.usage else None
+                    except Exception:
+                        output = str(result)
 
-            return result
+                    with lf.start_as_current_observation(
+                        as_type="generation",
+                        name="completion_generation",
+                        input=prompt,
+                        output=output,
+                        metadata={
+                            "latency_ms": round((time.time() - start) * 1000, 2),
+                            "status": "success",
+                            "usage": usage,
+                            "model": self.model_id,
+                        },
+                    ):
+                        pass
 
-        except Exception as e:
-            if trace:
-                err_span = trace.span(
-                    name="completion_error",
-                    input=prompt,
-                    metadata={
-                        "error": str(e),
-                        "latency_ms": round((time.time() - start) * 1000, 2),
-                        "status": "error",
-                    },
-                )
-                err_span.end()
-                trace.end()
-            raise
+                    return result
+
+                except Exception as e:
+                    with lf.start_as_current_observation(
+                        as_type="span",
+                        name="completion_error",
+                        input=prompt,
+                        metadata={
+                            "error": str(e),
+                            "latency_ms": round((time.time() - start) * 1000, 2),
+                            "status": "error",
+                        },
+                    ):
+                        pass
+                    raise
 
     ModelAsAService.completion = _mark_patched(wrapped)
 
@@ -357,10 +351,5 @@ def apply_langfuse_patch():
     _patch_chat_completion()
     _patch_completion()
 
-
-
-def apply_langfuse_patch():
-    _patch_chat_completion()
-    _patch_completion()
 
 
