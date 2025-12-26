@@ -188,9 +188,9 @@ def _get_context():
     }
 
 
-# -------------------------------------------------
-# chat_completion patch (TOKENS FIXED)
-# -------------------------------------------------
+# =================================================
+# chat_completion PATCH (LATENCY + TOKENS CORRECT)
+# =================================================
 
 def _patch_chat_completion():
     original = ModelAsAService.chat_completion
@@ -200,43 +200,54 @@ def _patch_chat_completion():
     @wraps(original)
     def wrapped(self, messages, stream=False, **kwargs):
         lf = get_langfuse()
-        start = time.time()
         ctx = _get_context()
 
+        # Fallback: no Langfuse or streaming
         if not lf or stream:
             return original(self, messages, stream=stream, **kwargs)
 
+        # -------------------------------
+        # ROOT SPAN (request scope)
+        # -------------------------------
         with lf.start_as_current_observation(
             as_type="span",
             name="chat_completion",
             input={"messages": messages, "params": kwargs},
-            metadata={"model": self.model_id},
+            metadata={
+                "model": self.model_id,
+                "type": "chat",
+            },
         ):
             with propagate_attributes(
                 user_id=ctx["user_id"],
                 session_id=ctx["session_id"],
             ):
-                result = original(self, messages, stream=stream, **kwargs)
 
-                # Extract output
-                output = result.choices[0].message.content
-
-                # Extract token usage (MAAS-compatible)
-                usage_details = None
-                if getattr(result, "usage", None):
-                    usage_details = {
-                        "input": result.usage.prompt_tokens,
-                        "output": result.usage.completion_tokens,
-                        # total auto-derived
-                    }
-
-                # ✅ Proper GENERATION with tokens
+                # -------------------------------
+                # GENERATION (model scope)
+                # -------------------------------
                 with lf.start_as_current_observation(
                     as_type="generation",
                     name="chat_completion_generation",
                     input=messages,
                     model=self.model_id,
                 ):
+                    # 🔥 MODEL EXECUTION HAPPENS HERE
+                    start = time.time()
+                    result = original(self, messages, stream=stream, **kwargs)
+                    latency_ms = round((time.time() - start) * 1000, 2)
+
+                    output = result.choices[0].message.content
+
+                    usage_details = None
+                    if getattr(result, "usage", None):
+                        usage_details = {
+                            "input": result.usage.prompt_tokens,
+                            "output": result.usage.completion_tokens,
+                            # total auto-derived by Langfuse
+                        }
+
+                    # ✅ Proper Langfuse API for tokens + output
                     lf.update_current_generation(
                         output={
                             "role": "assistant",
@@ -244,7 +255,8 @@ def _patch_chat_completion():
                         },
                         usage_details=usage_details,
                         metadata={
-                            "latency_ms": round((time.time() - start) * 1000, 2)
+                            "latency_ms": latency_ms,
+                            "status": "success",
                         },
                     )
 
@@ -253,9 +265,9 @@ def _patch_chat_completion():
     ModelAsAService.chat_completion = _mark_patched(wrapped)
 
 
-# -------------------------------------------------
-# completion patch (TOKENS FIXED)
-# -------------------------------------------------
+# =================================================
+# completion PATCH (LATENCY + TOKENS CORRECT)
+# =================================================
 
 def _patch_completion():
     original = ModelAsAService.completion
@@ -265,7 +277,6 @@ def _patch_completion():
     @wraps(original)
     def wrapped(self, prompt, stream=False, **kwargs):
         lf = get_langfuse()
-        start = time.time()
         ctx = _get_context()
 
         if not lf or stream:
@@ -275,34 +286,40 @@ def _patch_completion():
             as_type="span",
             name="completion",
             input={"prompt": prompt, "params": kwargs},
-            metadata={"model": self.model_id},
+            metadata={
+                "model": self.model_id,
+                "type": "completion",
+            },
         ):
             with propagate_attributes(
                 user_id=ctx["user_id"],
                 session_id=ctx["session_id"],
             ):
-                result = original(self, prompt, stream=stream, **kwargs)
-
-                output = result.choices[0].text
-
-                usage_details = None
-                if getattr(result, "usage", None):
-                    usage_details = {
-                        "input": result.usage.prompt_tokens,
-                        "output": result.usage.completion_tokens,
-                    }
-
                 with lf.start_as_current_observation(
                     as_type="generation",
                     name="completion_generation",
                     input=prompt,
                     model=self.model_id,
                 ):
+                    start = time.time()
+                    result = original(self, prompt, stream=stream, **kwargs)
+                    latency_ms = round((time.time() - start) * 1000, 2)
+
+                    output = result.choices[0].text
+
+                    usage_details = None
+                    if getattr(result, "usage", None):
+                        usage_details = {
+                            "input": result.usage.prompt_tokens,
+                            "output": result.usage.completion_tokens,
+                        }
+
                     lf.update_current_generation(
                         output=output,
                         usage_details=usage_details,
                         metadata={
-                            "latency_ms": round((time.time() - start) * 1000, 2)
+                            "latency_ms": latency_ms,
+                            "status": "success",
                         },
                     )
 
@@ -311,10 +328,11 @@ def _patch_completion():
     ModelAsAService.completion = _mark_patched(wrapped)
 
 
+# =================================================
+# APPLY PATCH
+# =================================================
+
 def apply_langfuse_patch():
     _patch_chat_completion()
     _patch_completion()
-
-
-
 
