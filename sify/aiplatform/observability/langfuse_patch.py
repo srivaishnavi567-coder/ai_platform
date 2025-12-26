@@ -189,7 +189,7 @@ def _get_context():
 
 
 # -------------------------------------------------
-# chat_completion patch (OBSERVATION API)
+# chat_completion patch (TOKENS FIXED)
 # -------------------------------------------------
 
 def _patch_chat_completion():
@@ -206,71 +206,55 @@ def _patch_chat_completion():
         if not lf or stream:
             return original(self, messages, stream=stream, **kwargs)
 
-        # ✅ Root observation
         with lf.start_as_current_observation(
             as_type="span",
             name="chat_completion",
-            input={
-                "messages": messages,
-                "params": kwargs,
-            },
-            metadata={
-                "model": self.model_id,
-                "type": "chat",
-            },
+            input={"messages": messages, "params": kwargs},
+            metadata={"model": self.model_id},
         ):
-            # ✅ Propagate user_id & session_id (DOCS WAY)
             with propagate_attributes(
-                user_id=ctx.get("user_id"),
-                session_id=ctx.get("session_id"),
+                user_id=ctx["user_id"],
+                session_id=ctx["session_id"],
             ):
-                try:
-                    result = original(self, messages, stream=stream, **kwargs)
+                result = original(self, messages, stream=stream, **kwargs)
 
-                    output = None
-                    usage = None
-                    try:
-                        output = result.choices[0].message.content
-                        usage = result.usage.__dict__ if result.usage else None
-                    except Exception:
-                        output = str(result)
+                # Extract output
+                output = result.choices[0].message.content
 
-                    # ✅ Generation observation
-                    with lf.start_as_current_observation(
-                        as_type="generation",
-                        name="chat_completion_generation",
-                        input=messages,
-                        output=output,
-                        metadata={
-                            "latency_ms": round((time.time() - start) * 1000, 2),
-                            "status": "success",
-                            "usage": usage,
-                            "model": self.model_id,
+                # Extract token usage (MAAS-compatible)
+                usage_details = None
+                if getattr(result, "usage", None):
+                    usage_details = {
+                        "input": result.usage.prompt_tokens,
+                        "output": result.usage.completion_tokens,
+                        # total auto-derived
+                    }
+
+                # ✅ Proper GENERATION with tokens
+                with lf.start_as_current_observation(
+                    as_type="generation",
+                    name="chat_completion_generation",
+                    input=messages,
+                    model=self.model_id,
+                ):
+                    lf.update_current_generation(
+                        output={
+                            "role": "assistant",
+                            "content": output,
                         },
-                    ):
-                        pass
-
-                    return result
-
-                except Exception as e:
-                    with lf.start_as_current_observation(
-                        as_type="span",
-                        name="chat_completion_error",
-                        input=messages,
+                        usage_details=usage_details,
                         metadata={
-                            "error": str(e),
-                            "latency_ms": round((time.time() - start) * 1000, 2),
-                            "status": "error",
+                            "latency_ms": round((time.time() - start) * 1000, 2)
                         },
-                    ):
-                        pass
-                    raise
+                    )
+
+                return result
 
     ModelAsAService.chat_completion = _mark_patched(wrapped)
 
 
 # -------------------------------------------------
-# completion patch (OBSERVATION API)
+# completion patch (TOKENS FIXED)
 # -------------------------------------------------
 
 def _patch_completion():
@@ -290,59 +274,39 @@ def _patch_completion():
         with lf.start_as_current_observation(
             as_type="span",
             name="completion",
-            input={
-                "prompt": prompt,
-                "params": kwargs,
-            },
-            metadata={
-                "model": self.model_id,
-                "type": "completion",
-            },
+            input={"prompt": prompt, "params": kwargs},
+            metadata={"model": self.model_id},
         ):
             with propagate_attributes(
-                user_id=ctx.get("user_id"),
-                session_id=ctx.get("session_id"),
+                user_id=ctx["user_id"],
+                session_id=ctx["session_id"],
             ):
-                try:
-                    result = original(self, prompt, stream=stream, **kwargs)
+                result = original(self, prompt, stream=stream, **kwargs)
 
-                    output = None
-                    usage = None
-                    try:
-                        output = result.choices[0].text
-                        usage = result.usage.__dict__ if result.usage else None
-                    except Exception:
-                        output = str(result)
+                output = result.choices[0].text
 
-                    with lf.start_as_current_observation(
-                        as_type="generation",
-                        name="completion_generation",
-                        input=prompt,
+                usage_details = None
+                if getattr(result, "usage", None):
+                    usage_details = {
+                        "input": result.usage.prompt_tokens,
+                        "output": result.usage.completion_tokens,
+                    }
+
+                with lf.start_as_current_observation(
+                    as_type="generation",
+                    name="completion_generation",
+                    input=prompt,
+                    model=self.model_id,
+                ):
+                    lf.update_current_generation(
                         output=output,
+                        usage_details=usage_details,
                         metadata={
-                            "latency_ms": round((time.time() - start) * 1000, 2),
-                            "status": "success",
-                            "usage": usage,
-                            "model": self.model_id,
+                            "latency_ms": round((time.time() - start) * 1000, 2)
                         },
-                    ):
-                        pass
+                    )
 
-                    return result
-
-                except Exception as e:
-                    with lf.start_as_current_observation(
-                        as_type="span",
-                        name="completion_error",
-                        input=prompt,
-                        metadata={
-                            "error": str(e),
-                            "latency_ms": round((time.time() - start) * 1000, 2),
-                            "status": "error",
-                        },
-                    ):
-                        pass
-                    raise
+                return result
 
     ModelAsAService.completion = _mark_patched(wrapped)
 
@@ -350,6 +314,7 @@ def _patch_completion():
 def apply_langfuse_patch():
     _patch_chat_completion()
     _patch_completion()
+
 
 
 
